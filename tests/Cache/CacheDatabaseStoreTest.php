@@ -7,6 +7,7 @@ use Illuminate\Cache\DatabaseStore;
 use Illuminate\Database\Connection;
 use Illuminate\Database\PostgresConnection;
 use Illuminate\Database\SQLiteConnection;
+use Illuminate\Support\Carbon;
 use Mockery as m;
 use PHPUnit\Framework\TestCase;
 use stdClass;
@@ -154,11 +155,10 @@ class CacheDatabaseStoreTest extends TestCase
         $this->assertTrue($result);
     }
 
-    public function testIncrementReturnsCorrectValues()
+    public function testIncrementUnsetValue()
     {
         $store = $this->getStore();
         $table = m::mock(stdClass::class);
-        $cache = m::mock(stdClass::class);
 
         $store->getConnection()->shouldReceive('transaction')->once()->with(m::type(Closure::class))->andReturnUsing(function ($closure) {
             return $closure();
@@ -167,7 +167,15 @@ class CacheDatabaseStoreTest extends TestCase
         $table->shouldReceive('where')->once()->with('key', 'prefixfoo')->andReturn($table);
         $table->shouldReceive('lockForUpdate')->once()->andReturn($table);
         $table->shouldReceive('first')->once()->andReturn(null);
-        $this->assertFalse($store->increment('foo'));
+        $table->shouldReceive('upsert')->once()->andReturn(1);
+        $this->assertEquals(1, $store->increment('foo'));
+    }
+
+    public function testIncrementWithNonNumericValue()
+    {
+        $store = $this->getStore();
+        $table = m::mock(stdClass::class);
+        $cache = m::mock(stdClass::class);
 
         $cache->value = serialize('bar');
         $store->getConnection()->shouldReceive('transaction')->once()->with(m::type(Closure::class))->andReturnUsing(function ($closure) {
@@ -178,6 +186,13 @@ class CacheDatabaseStoreTest extends TestCase
         $table->shouldReceive('lockForUpdate')->once()->andReturn($table);
         $table->shouldReceive('first')->once()->andReturn($cache);
         $this->assertFalse($store->increment('foo'));
+    }
+
+    public function testIncrementExistingValue()
+    {
+        $store = $this->getStore();
+        $table = m::mock(stdClass::class);
+        $cache = m::mock(stdClass::class);
 
         $cache->value = serialize(2);
         $store->getConnection()->shouldReceive('transaction')->once()->with(m::type(Closure::class))->andReturnUsing(function ($closure) {
@@ -189,15 +204,35 @@ class CacheDatabaseStoreTest extends TestCase
         $table->shouldReceive('first')->once()->andReturn($cache);
         $store->getConnection()->shouldReceive('table')->once()->with('table')->andReturn($table);
         $table->shouldReceive('where')->once()->with('key', 'prefixfoo')->andReturn($table);
-        $table->shouldReceive('update')->once()->with(['value' => serialize(3)]);
+        $table->shouldReceive('upsert')->once()->withArgs(fn ($args) => $args['value'] === serialize(3))->andReturn(1);
         $this->assertEquals(3, $store->increment('foo'));
     }
 
-    public function testDecrementReturnsCorrectValues()
+    public function testIncrementExistingValueWithExpirationTime()
     {
         $store = $this->getStore();
         $table = m::mock(stdClass::class);
         $cache = m::mock(stdClass::class);
+
+        $cache->value = serialize(2);
+        $cache->expiration = Carbon::now()->addMinute()->getTimestamp();
+        $store->getConnection()->shouldReceive('transaction')->once()->with(m::type(Closure::class))->andReturnUsing(function ($closure) {
+            return $closure();
+        });
+        $store->getConnection()->shouldReceive('table')->once()->with('table')->andReturn($table);
+        $table->shouldReceive('where')->once()->with('key', 'prefixfoo')->andReturn($table);
+        $table->shouldReceive('lockForUpdate')->once()->andReturn($table);
+        $table->shouldReceive('first')->once()->andReturn($cache);
+        $store->getConnection()->shouldReceive('table')->once()->with('table')->andReturn($table);
+        $table->shouldReceive('where')->once()->with('key', 'prefixfoo')->andReturn($table);
+        $table->shouldReceive('upsert')->once()->withArgs(fn ($args) => $args['expiration'] === $cache->expiration)->andReturn(1);
+        $this->assertEquals(3, $store->increment('foo'));
+    }
+
+    public function testDecrementUnsetValue()
+    {
+        $store = $this->getStore();
+        $table = m::mock(stdClass::class);
 
         $store->getConnection()->shouldReceive('transaction')->once()->with(m::type(Closure::class))->andReturnUsing(function ($closure) {
             return $closure();
@@ -206,7 +241,15 @@ class CacheDatabaseStoreTest extends TestCase
         $table->shouldReceive('where')->once()->with('key', 'prefixfoo')->andReturn($table);
         $table->shouldReceive('lockForUpdate')->once()->andReturn($table);
         $table->shouldReceive('first')->once()->andReturn(null);
-        $this->assertFalse($store->decrement('foo'));
+        $table->shouldReceive('upsert')->once()->andReturn(1);
+        $this->assertEquals(1, $store->increment('foo'));
+    }
+
+    public function testDecrementWithNonNumericValue()
+    {
+        $store = $this->getStore();
+        $table = m::mock(stdClass::class);
+        $cache = m::mock(stdClass::class);
 
         $cache->value = serialize('bar');
         $store->getConnection()->shouldReceive('transaction')->once()->with(m::type(Closure::class))->andReturnUsing(function ($closure) {
@@ -217,6 +260,13 @@ class CacheDatabaseStoreTest extends TestCase
         $table->shouldReceive('lockForUpdate')->once()->andReturn($table);
         $table->shouldReceive('first')->once()->andReturn($cache);
         $this->assertFalse($store->decrement('foo'));
+    }
+
+    public function testDecrementReturnsCorrectValues()
+    {
+        $store = $this->getStore();
+        $table = m::mock(stdClass::class);
+        $cache = m::mock(stdClass::class);
 
         $cache->value = serialize(3);
         $store->getConnection()->shouldReceive('transaction')->once()->with(m::type(Closure::class))->andReturnUsing(function ($closure) {
@@ -228,7 +278,7 @@ class CacheDatabaseStoreTest extends TestCase
         $table->shouldReceive('first')->once()->andReturn($cache);
         $store->getConnection()->shouldReceive('table')->once()->with('table')->andReturn($table);
         $table->shouldReceive('where')->once()->with('key', 'prefixbar')->andReturn($table);
-        $table->shouldReceive('update')->once()->with(['value' => serialize(2)]);
+        $table->shouldReceive('upsert')->once()->withArgs(fn ($args) => $args['value'] === serialize(2))->andReturn(1);
         $this->assertEquals(2, $store->decrement('bar'));
     }
 

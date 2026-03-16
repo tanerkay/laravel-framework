@@ -278,16 +278,16 @@ class DatabaseStore implements CanFlushLocks, LockProvider, Store
             $cache = $this->table()->where('key', $prefixed)
                 ->lockForUpdate()->first();
 
-            // If there is no value in the cache, we will return false here. Otherwise the
+            // If there is no value in the cache, we'll set the value to 0. Otherwise, the
             // value will be decrypted and we will proceed with this function to either
             // increment or decrement this value based on the given action callbacks.
-            if (is_null($cache)) {
-                return false;
+            $current = 0;
+
+            if ($cache !== null) {
+                $cache = is_array($cache) ? (object) $cache : $cache;
+
+                $current = $this->unserialize($cache->value);
             }
-
-            $cache = is_array($cache) ? (object) $cache : $cache;
-
-            $current = $this->unserialize($cache->value);
 
             // Here we'll call this callback function that was given to the function which
             // is used to either increment or decrement the function. We use a callback
@@ -301,9 +301,11 @@ class DatabaseStore implements CanFlushLocks, LockProvider, Store
             // Here we will update the values in the table. We will also encrypt the value
             // since database cache values are encrypted by default with secure storage
             // that can't be easily read. We will return the new value after storing.
-            $this->table()->where('key', $prefixed)->update([
+            $this->table()->upsert([
+                'key' => $prefixed,
                 'value' => $this->serialize($new),
-            ]);
+                'expiration' => $cache?->expiration ?? ($this->getTime() + 315360000),
+            ], 'key', ['value']);
 
             return $new;
         });
